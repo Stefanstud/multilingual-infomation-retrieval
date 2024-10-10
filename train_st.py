@@ -5,6 +5,8 @@ from sentence_transformers import SentenceTransformer, losses, SentenceTransform
 from datasets import Dataset
 import os  # For creating directories
 
+
+
 def prepare_dataset(df, corpus_dict):
     """Preprocesses a DataFrame (train or dev) into a Hugging Face Dataset."""
     queries = []
@@ -48,10 +50,7 @@ def prepare_dataset(df, corpus_dict):
         "negative": negatives
     })
 
-
-
-
-# Load the corpus and create the corpus dictionary for faster lookups
+# # Load the corpus and create the corpus dictionary for faster lookups
 with open('data/corpus.json', 'r', encoding='utf-8') as f:
     corpus = json.load(f)
 corpus_dict = {doc['docid']: doc['text'] for doc in corpus}
@@ -63,26 +62,23 @@ train_dataset = prepare_dataset(train_df, corpus_dict)
 dev_df = pd.read_csv('data/dev.csv')
 eval_dataset = prepare_dataset(dev_df, corpus_dict)  # Use eval_dataset as this is the standard name in the trainer
 
-
 # Load the pre-trained model
-model_name = "intfloat/multilingual-e5-small"
-model = SentenceTransformer(model_name)
-
+model_name = "Alibaba-NLP/gte-multilingual-base"
+model = SentenceTransformer(model_name, trust_remote_code=True)
 
 # Define loss, training arguments, and trainer (Following example closely)
 loss = losses.CachedMultipleNegativesRankingLoss(model)
 
-output_path = 'output/finetuned-e5-model-cmnrl'
+output_path = 'finetuned-gte-multilingual-base'
 
 # Create the output directory if it doesn't exist
 os.makedirs(output_path, exist_ok=True)
 
-
 args = SentenceTransformerTrainingArguments(
     output_dir=output_path,
     num_train_epochs=1, 
-    per_device_train_batch_size=16, 
-    per_device_eval_batch_size=16, 
+    per_device_train_batch_size=8, 
+    per_device_eval_batch_size=8, 
     learning_rate=2e-5,
     warmup_ratio=0.1,
     fp16=True, # if gpu is fp16 compatible
@@ -93,7 +89,7 @@ args = SentenceTransformerTrainingArguments(
     save_steps=100, # save model every 100 steps
     save_total_limit=2,  # Keep only the last 2 checkpoints
     logging_steps=100,
-    run_name="mnrl-finetuning"
+    run_name="gte-finetuning"
 )
 
 trainer = SentenceTransformerTrainer(
@@ -104,11 +100,9 @@ trainer = SentenceTransformerTrainer(
     loss=loss
 )
 
-
-
 # Train and save the model
 trainer.train()
 model.save_pretrained(os.path.join(output_path, "final")) # Save within output_path
-
-
 print(f"Fine-tuned model saved to: {os.path.join(output_path, 'final')}")
+
+# model.push_to_hub("StefanKrsteski/gte-multilingual-tuned")  # Push to the Hugging Face Hub
