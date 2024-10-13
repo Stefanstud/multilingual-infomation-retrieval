@@ -11,7 +11,6 @@ from nltk.corpus import stopwords
 import string 
 import numpy as np
 from scipy.sparse import lil_matrix, csr_matrix
-from konlpy.tag import Okt
 from collections import defaultdict
 import math
 
@@ -20,7 +19,7 @@ nltk.download('stopwords')
 nltk.download('punkt_tab')
 
 # load corpus
-with open('../data/corpus-small.json', 'r', encoding='utf-8') as f:
+with open('../data/corpus.json', 'r', encoding='utf-8') as f:
     corpus = json.load(f)
 
 # from txt load korean stopwords 
@@ -61,7 +60,9 @@ idx_to_docid = {
     "ko": {}
 }
 
-okt = Okt()
+def tokenize_korean_simple(text):
+    tokens = text.split()
+    return tokens
 
 def tokenize(docs):
     tokenized_docs = defaultdict(dict)
@@ -74,7 +75,7 @@ def tokenize(docs):
         text_no_punctuation = "".join([ch for ch in text if ch not in string.punctuation])
         
         if lang == 'ko':
-            tokens = okt.morphs(text_no_punctuation)
+            tokens = tokenize_korean_simple(text_no_punctuation)
         else:
             tokens = word_tokenize(text_no_punctuation)
         
