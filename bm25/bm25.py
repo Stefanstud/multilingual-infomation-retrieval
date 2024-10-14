@@ -13,6 +13,7 @@ import numpy as np
 from scipy.sparse import lil_matrix, csr_matrix
 from collections import defaultdict
 import math
+import tiktoken
 
 nltk.download('punkt')
 nltk.download('stopwords')
@@ -67,28 +68,39 @@ def tokenize_korean_simple(text):
 def tokenize(docs):
     tokenized_docs = defaultdict(dict)
 
+    # Load GPT tokenizer
+    encoder =  tiktoken.encoding_for_model("gpt-4o")
+
     for doc in tqdm(docs, desc="Tokenizing batch"):
         docid = doc['docid']
         text = doc['text']
         lang = doc['lang']
 
-        text_no_punctuation = "".join([ch for ch in text if ch not in string.punctuation])
-        
-        if lang == 'ko':
-            tokens = tokenize_korean_simple(text_no_punctuation)
-        else:
-            tokens = word_tokenize(text_no_punctuation)
-        
+        # Lowercase the text
+        lowered_text = text.lower()
+
+        # Remove punctuation
+        text_no_punctuation = "".join([ch for ch in lowered_text if ch not in string.punctuation])
+
+        # Split text into words
+        words = text_no_punctuation.split()
+
+        # Remove stopwords
         stop_words = language_stopwords.get(lang, set())
-        filtered_tokens = [word.lower() for word in tokens if word.lower() not in stop_words]
+        filtered_words = [word for word in words if word not in stop_words]
+
+        # Reconstruct the text
+        filtered_text = ' '.join(filtered_words)
+
+        tokens = encoder.encode(filtered_text)
 
         tf = defaultdict(int)
-        for token in filtered_tokens:
+        for token in tokens:
             tf[token] += 1
 
         tokenized_docs[lang][docid] = {
             'tf': tf,
-            'doc_len': len(filtered_tokens),
+            'doc_len': len(tokens),
             'lang': lang
         }
 
