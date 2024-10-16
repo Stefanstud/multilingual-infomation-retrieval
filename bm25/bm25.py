@@ -13,7 +13,6 @@ import numpy as np
 from scipy.sparse import lil_matrix, csr_matrix
 from collections import defaultdict
 import math
-import tiktoken
 
 nltk.download('punkt')
 nltk.download('stopwords')
@@ -68,39 +67,28 @@ def tokenize_korean_simple(text):
 def tokenize(docs):
     tokenized_docs = defaultdict(dict)
 
-    # Load GPT tokenizer
-    encoder =  tiktoken.encoding_for_model("gpt-4o")
-
     for doc in tqdm(docs, desc="Tokenizing batch"):
         docid = doc['docid']
         text = doc['text']
         lang = doc['lang']
 
-        # Lowercase the text
-        lowered_text = text.lower()
-
-        # Remove punctuation
-        text_no_punctuation = "".join([ch for ch in lowered_text if ch not in string.punctuation])
-
-        # Split text into words
-        words = text_no_punctuation.split()
-
-        # Remove stopwords
+        text_no_punctuation = "".join([ch for ch in text if ch not in string.punctuation])
+        
+        if lang == 'ko':
+            tokens = tokenize_korean_simple(text_no_punctuation)
+        else:
+            tokens = word_tokenize(text_no_punctuation)
+        
         stop_words = language_stopwords.get(lang, set())
-        filtered_words = [word for word in words if word not in stop_words]
-
-        # Reconstruct the text
-        filtered_text = ' '.join(filtered_words)
-
-        tokens = encoder.encode(filtered_text)
+        filtered_tokens = [word.lower() for word in tokens if word.lower() not in stop_words]
 
         tf = defaultdict(int)
-        for token in tokens:
+        for token in filtered_tokens:
             tf[token] += 1
 
         tokenized_docs[lang][docid] = {
             'tf': tf,
-            'doc_len': len(tokens),
+            'doc_len': len(filtered_tokens),
             'lang': lang
         }
 
@@ -133,7 +121,7 @@ def compute_corpus_statistics(tokenized_corpus_by_lang):
 
     return idf_by_lang, avgdl_by_lang
 
-def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, lang, is_query=False, k1=1.5, b=0.75):
+def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, lang, is_query=False, k1=1.2, b=0.7):
     """Builds a sparse matrix from documents or queries."""
     matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
 
