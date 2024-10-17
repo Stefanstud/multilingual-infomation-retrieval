@@ -10,13 +10,29 @@ import numpy as np
 from nltk.corpus import stopwords
 import string 
 import numpy as np
-from scipy.sparse import lil_matrix, csr_matrix
+from scipy.sparse import lil_matrix, csr_matrix, save_npz, load_npz
 from collections import defaultdict
 import math
+import pickle
+import os
+
+TOK_CORPUS_PATH = '../data/tokenized_corpus.pkl'
+BM25_MATRIX_PATH = '../data/bm25_matrix.pkl'
+IDX_TO_DOCID_PATH = '../data/idx_to_docid.pkl'
 
 nltk.download('punkt')
 nltk.download('stopwords')
 nltk.download('punkt_tab')
+
+
+def save_data(data, file_name):
+    with open(file_name, 'wb') as f:
+        pickle.dump(data, f)
+
+def load_data(file_name):
+    with open(file_name, 'rb') as f:
+        return pickle.load(f)
+
 
 # load corpus
 with open('../data/corpus.json', 'r', encoding='utf-8') as f:
@@ -152,9 +168,17 @@ def write_submission_csv(results_final, output_path):
             # save as list like this: 0,"['doc-en-0', 'doc-de-14895', 'doc-en-829265', 'doc-en-147113', 'doc-en-644359', 'doc-en-585315', 'doc-en-234047', 'doc-en-14117', 'doc-en-794977', 'doc-en-374766']"
             writer.writerow([idx, str(docs)])
 
-tokenized_corpus_by_lang = tokenize(corpus)
+print("Tokenizing corpus...")
+if os.path.exists(TOK_CORPUS_PATH):
+    tokenized_corpus_by_lang = load_data(TOK_CORPUS_PATH)
+else:
+    tokenized_corpus_by_lang = tokenize(corpus)
+    save_data(tokenized_corpus_by_lang, TOK_CORPUS_PATH)
+
+print("Tokenizing queries...")
 tokenized_queries_by_lang = tokenize(test_queries)
 
+print("Building vocab...")
 # make vocab per language
 vocab_by_lang = {}
 for lang, tokenized_docs in tokenized_corpus_by_lang.items():
@@ -164,24 +188,34 @@ for lang, tokenized_docs in tokenized_corpus_by_lang.items():
     vocab_by_lang[lang] = vocab
 
 
+print("Retrieving results...")
 # now call build sparse matrix per language
 results_final = {}
+bm25_matrix = {}
 scores_matrix_lang = {}
+
+if os.path.exists(BM25_MATRIX_PATH):
+    bm25_matrix = load_data(BM25_MATRIX_PATH)
+
 idf_by_lang, avgdl_by_lang = compute_corpus_statistics(tokenized_corpus_by_lang)
 for lang in tokenized_queries_by_lang:
     if lang not in tokenized_corpus_by_lang:
-        continue
+        continue 
 
-    idfs = idf_by_lang[lang]
-    avgdl = avgdl_by_lang[lang]
-    vocab = {term: idx for idx, term in enumerate(idfs.keys())}
+    if bm25_matrix.get(lang) is not None:
+        doc_matrix = bm25_matrix[lang]
+    else:
+        vocab = {term: idx for idx, term in enumerate(vocab_by_lang[lang])}
+        doc_matrix = build_sparse_matrix(tokenized_corpus_by_lang[lang], vocab, idf_by_lang[lang], avgdl_by_lang[lang], lang)
+        bm25_matrix[lang] = doc_matrix
 
-    doc_matrix = build_sparse_matrix(tokenized_corpus_by_lang[lang], vocab, idfs, avgdl, lang)
-    query_matrix = build_sparse_matrix(tokenized_queries_by_lang[lang], vocab, idfs, avgdl, lang, is_query=True)
-
+    query_matrix = build_sparse_matrix(tokenized_queries_by_lang[lang], vocab, idf_by_lang[lang], avgdl_by_lang[lang], lang, is_query=True)
     scores_matrix = query_matrix.dot(doc_matrix.T)
-    # to dense 
-    scores_matrix_lang[lang] = scores_matrix.toarray()
+    scores_matrix_lang[lang] = scores_matrix
+
+# save bm25 matrix and idx to docid
+save_data(bm25_matrix, BM25_MATRIX_PATH)
+save_data(idx_to_docid, IDX_TO_DOCID_PATH)
 
 # initialize final res matrix with dim test_data.shape[0] x k
 k = 10
@@ -189,11 +223,8 @@ results_final = {}
 
 # populate results fina;
 for lang in test_data['lang'].unique():
-    if lang not in tokenized_corpus_by_lang:
-        continue
-
     lang_idx = test_data[test_data['lang'] == lang].index
-    scores_matrix = scores_matrix_lang[lang]
+    scores_matrix = scores_matrix_lang[lang].toarray()
 
     for i, idx in enumerate(lang_idx):
         scores = scores_matrix[i]
