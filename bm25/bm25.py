@@ -58,6 +58,10 @@ def tokenize(docs, language_stopwords):
 
 
 def compute_corpus_statistics(tokenized_docs):
+    """
+    Computes the idf and average document length for each language in the corpus.
+    Can be loaded from a file to have a faster runtime.
+    """
     idf_by_lang = defaultdict(lambda: defaultdict(int))
     avgdl_by_lang = defaultdict(float)
     doc_len_by_lang = defaultdict(int)
@@ -91,33 +95,29 @@ def compute_corpus_statistics(tokenized_docs):
     return idf_by_lang, avgdl_by_lang
 
 
-def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, k1=1.2, b=0.7):
+def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
     """Builds a sparse matrix from documents or queries."""
     matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
     idx_to_docid = {} # maps int to docid; 0 -> doc-en-23; 1 -> doc-en-3223 ...
      
-    # if not is_query:
-    # idx is used to index the lil_matrix (instead of docid) since it does not accept str as index
-    for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc = "Building embeddings"):  # example
-        idx_to_docid[idx] = docid # 0 -> doc-en-23; 1 -> doc-en-3223 ...
-        norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']]) 
-        for term, freq in doc['tf'].items():
-            if term in vocab: # example error I got for building query: KeyError: 'getfruitbytypenamehighconcurrentversion'
-                term_index = vocab[term]
-            else:
-                continue
-            tf_adjusted = freq * (k1 + 1) / (freq + norm_factor)
-            matrix[idx, term_index] = tf_adjusted * idfs[doc['lang']].get(term, 0)         
-    # else:
-    #     for idx, (_, query) in enumerate(docs_or_queries.items()):
-    #         for term, freq in query['tf'].items():
-    #             if term in vocab:
-    #                 term_index = vocab[term]
-    #                 matrix[idx, term_index] = freq  
-                    
-    #                # Apply BM25-like adjustment for query terms
-    #                 tf_adjusted = freq * (k1 + 1) / (freq + k1)  # No length normalization for queries
-    #                 matrix[idx, term_index] = tf_adjusted * idfs[query['lang']].get(term, 0)
+    if not is_query:
+        # idx is used to index the lil_matrix (instead of docid) since it does not accept str as index
+        for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc = "Building embeddings"):  # example
+            idx_to_docid[idx] = docid # 0 -> doc-en-23; 1 -> doc-en-3223 ...
+            norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']]) 
+            for term, freq in doc['tf'].items():
+                if term in vocab: # example error I got for building query: KeyError: 'getfruitbytypenamehighconcurrentversion'
+                    term_index = vocab[term]
+                    tf_adjusted = freq * (k1 + 1) / (freq + norm_factor)
+                    matrix[idx, term_index] = tf_adjusted * idfs[doc['lang']].get(term, 0)         
+    else:
+        for idx, (_, query) in enumerate(docs_or_queries.items()):
+            for term, freq in query['tf'].items():
+                if term in vocab:
+                    term_index = vocab[term]
+                    matrix[idx, term_index] = freq  
+                    tf_adjusted = freq * (k1 + 1) / (freq + k1)  # No length normalization for queries
+                    matrix[idx, term_index] = tf_adjusted * idfs[query['lang']].get(term, 0)
 
     return csr_matrix(matrix), idx_to_docid # idx_to_docid useful only for corpus
 
@@ -131,6 +131,7 @@ def write_submission_csv(results_final, output_path):
             writer.writerow([idx, str(docs)])
 
 def build_vocab(tokenized_corpus):
+    """ Builds a vocabulary from the tokenized corpus. This can also be loaded from this to have a faster runtime"""
     print("Building vocab...")
     vocab = set()
     for doc in tokenized_corpus.values():
@@ -196,6 +197,7 @@ def main():
     # compute corpus stistics
     idfs, avgdls = compute_corpus_statistics(tokenized_corpus)
     
+    print("Corpus...")
     # build document and query embeddings using bm25 methodologyprint("Corpus ...")
     if os.path.exists(BM25_MATRIX_PATH):
         bm25_matrix = load_data(BM25_MATRIX_PATH)
@@ -203,8 +205,8 @@ def main():
     else:
         bm25_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
     
-    print("Query ...")
-    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls)
+    print("Query...")
+    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query=True)
     
     scores_matrix = query_matrix.dot(bm25_matrix.T)
     scores_matrix = scores_matrix.toarray() # convert from compressed sparse matrix to dense matrix  
@@ -217,17 +219,6 @@ def main():
         top_k_idx = np.argsort(scores_matrix[i])[::-1][:k] # ith query ; get top rated docs
         top_k_idx = [idx_to_docid[j] for j in top_k_idx] 
         results_final[i] = top_k_idx    # save bm25 matrix and idx to docid
-
-
-    for i in tqdm(range(len(test_data)), desc="Sorting results"): 
-        query_lang = test_data.iloc[i]["lang"] 
-        matching_lang_idx = [j for j in range(scores_matrix.shape[1]) 
-                            if doc_metadata[j]["lang"] == query_lang]
-
-        filtered_scores = scores_matrix[i][matching_lang_idx]
-        top_k_idx_in_filtered = np.argsort(filtered_scores)[::-1][:k]
-        top_k_idx = [idx_to_docid[matching_lang_idx[j]] for j in top_k_idx_in_filtered]
-        results_final[i] = top_k_idx 
 
     save_data(bm25_matrix, BM25_MATRIX_PATH)
     save_data(idx_to_docid, IDX_TO_DOCID_PATH)
