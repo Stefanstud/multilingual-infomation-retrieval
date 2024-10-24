@@ -15,7 +15,6 @@ import math
 import pickle
 import os
 
-
 def save_data(data, file_name):
     with open(file_name, 'wb') as f:
         pickle.dump(data, f)
@@ -23,7 +22,6 @@ def save_data(data, file_name):
 def load_data(file_name):
     with open(file_name, 'rb') as f:
         return pickle.load(f)
-
 
 def tokenize_korean_simple(text):
     tokens = text.split()
@@ -81,7 +79,7 @@ def compute_corpus_statistics(tokenized_docs):
             idf_by_lang[lang][token] += 1
 
     # Calculate average document length (avgdl) and idf for each language
-    for lang, doc_count in doc_count_by_lang.items():
+    for lang, doc_count in tqdm(doc_count_by_lang.items(), desc="Calculating average document length and idf per language ..."):
         avgdl = doc_len_by_lang[lang] / doc_count
         avgdl_by_lang[lang] = avgdl
 
@@ -93,18 +91,21 @@ def compute_corpus_statistics(tokenized_docs):
     return idf_by_lang, avgdl_by_lang
 
 
-def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
+def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, k1=1.2, b=0.7):
     """Builds a sparse matrix from documents or queries."""
     matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
-    idx_to_docid = {} # maps int to docid
+    idx_to_docid = {} # maps int to docid; 0 -> doc-en-23; 1 -> doc-en-3223 ...
      
     # if not is_query:
     # idx is used to index the lil_matrix (instead of docid) since it does not accept str as index
-    for idx, (docid, doc) in enumerate(docs_or_queries.items()):  # example
+    for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc = "Building embeddings"):  # example
         idx_to_docid[idx] = docid # 0 -> doc-en-23; 1 -> doc-en-3223 ...
         norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']]) 
         for term, freq in doc['tf'].items():
-            term_index = vocab[term]
+            if term in vocab: # example error I got for building query: KeyError: 'getfruitbytypenamehighconcurrentversion'
+                term_index = vocab[term]
+            else:
+                continue
             tf_adjusted = freq * (k1 + 1) / (freq + norm_factor)
             matrix[idx, term_index] = tf_adjusted * idfs[doc['lang']].get(term, 0)         
     # else:
@@ -147,7 +148,8 @@ def main():
     nltk.download('punkt_tab')
 
     # load corpus
-    if os.path.exists(TOK_CORPUS_PATH):
+    print("Loading corpus...")
+    if not os.path.exists(TOK_CORPUS_PATH):
         with open('../data/corpus.json', 'r', encoding='utf-8') as f:
             corpus = json.load(f)
 
@@ -176,7 +178,7 @@ def main():
     
     print("Tokenizing corpus...")
     if os.path.exists(TOK_CORPUS_PATH):
-        tokenized_corpus_by_lang = load_data(TOK_CORPUS_PATH)
+        tokenized_corpus = load_data(TOK_CORPUS_PATH)
     else:
         tokenized_corpus = tokenize(corpus, language_stopwords)
         save_data(tokenized_corpus, TOK_CORPUS_PATH)
@@ -198,14 +200,19 @@ def main():
     # compute corpus stistics
     idfs, avgdls = compute_corpus_statistics(tokenized_corpus)
 
-    doc_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
-    bm25_matrix = doc_matrix
-    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query=True)
+    print("Corpus ...")
+    # build document and query embeddings using bm25 methodology
+    if not bm25_matrix: # if we have it pre-computed
+        doc_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
+        bm25_matrix = doc_matrix
+
+    print("Query ...")
+    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls)
     
     scores_matrix = query_matrix.dot(doc_matrix.T)
-    scores_matrix = scores_matrix.toarray() # to dense
-    
+    scores_matrix = scores_matrix.toarray() # convert from compressed sparse matrix to dense matrix  
     print("Scores computed, getting top_k results...")
+    
     # top 10 documents, save in results_final dict
     k = 10
     results_final = {}
