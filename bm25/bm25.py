@@ -10,6 +10,7 @@ from nltk.corpus import stopwords
 from scipy.sparse import lil_matrix, csr_matrix
 from scipy import sparse
 import os
+import csv
 import math
 
 class BM25ChunkRetriever:
@@ -100,7 +101,7 @@ class BM25ChunkRetriever:
             
         return tokenized_docs
     
-    def build_sparse_matrix(self, docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=2.0, b=0.7):
+    def build_sparse_matrix(self, docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
         matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
         idx_to_docid = {}
         
@@ -210,3 +211,12 @@ class BM25ChunkRetriever:
             results[i] = top_k_docs
             
         return results
+    
+    def create_submission_csv(self, test_data, corpus, output_path):
+        results = self.retrieve(test_data, corpus)
+        with open(output_path, 'w', newline='') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['id', 'docids'])
+            for idx, docs in results.items():
+                # save as list like this: 0,"['doc-en-0', 'doc-de-14895', 'doc-en-829265', 'doc-en-147113', 'doc-en-644359', 'doc-en-585315', 'doc-en-234047', 'doc-en-14117', 'doc-en-794977', 'doc-en-374766']"
+                writer.writerow([idx, str(docs)])
