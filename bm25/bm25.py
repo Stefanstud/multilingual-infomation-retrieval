@@ -19,7 +19,7 @@ class BM25ChunkRetriever:
         self.stopwords_path = stopwords_path
         self.chunk_size = chunk_size
         self.language_stopwords = self._init_stopwords()
-        self.chunk_to_original_doc = defaultdict(dict)
+        self.chunk_to_original_doc = defaultdict(str)
         
     def _init_stopwords(self):
         """Initialize stopwords for all supported languages"""
