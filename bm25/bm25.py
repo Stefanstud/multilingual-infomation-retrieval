@@ -62,7 +62,7 @@ class BM25ChunkRetriever:
         return [(docid, tokens[i:i + self.chunk_size]) 
                 for i in range(0, len(tokens), self.chunk_size)]
     
-    def tokenize(self, docs):
+    def tokenize(self, docs, is_query=False):
         """Tokenize documents into chunks while tracking original document IDs"""
         tokenized_docs = dict()
         chunk_counter = 0
@@ -89,7 +89,9 @@ class BM25ChunkRetriever:
                 
                 # Store chunk with unique ID while maintaining mapping to original doc
                 chunk_id = chunk_counter
-                self.chunk_to_original_doc[chunk_counter] = docid
+
+                if not is_query:
+                    self.chunk_to_original_doc[chunk_counter] = docid
                 
                 tokenized_docs[chunk_id] = {
                     'tf': tf,
@@ -177,7 +179,7 @@ class BM25ChunkRetriever:
             self.save_data(tokenized_corpus, tok_corpus_path)
             self.save_data(self.chunk_to_original_doc, os.path.join(cache_dir, 'chunk_mapping.pkl'))
             
-        tokenized_queries = self.tokenize(query_docs)
+        tokenized_queries = self.tokenize(query_docs, is_query=True)
         
         vocab = self.build_vocab(tokenized_corpus)
         idfs, avgdls = self.compute_corpus_statistics(tokenized_corpus)
