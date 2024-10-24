@@ -88,8 +88,8 @@ class BM25ChunkRetriever:
                 tf = Counter(filtered_tokens)
                 
                 # Store chunk with unique ID while maintaining mapping to original doc
-                chunk_id = f"{docid}_chunk_{chunk_counter}"
-                self.chunk_to_original_doc[chunk_id] = docid
+                chunk_id = chunk_counter
+                self.chunk_to_original_doc[chunk_counter] = docid
                 
                 tokenized_docs[chunk_id] = {
                     'tf': tf,
@@ -112,11 +112,11 @@ class BM25ChunkRetriever:
 
     def build_sparse_matrix(self, docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
         matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
-        idx_to_docid = {}
+        idx_to_chunkid = {}
         
         if not is_query:
-            for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc="Building matrix"):
-                idx_to_docid[idx] = docid
+            for idx, (chunkid, doc) in tqdm(enumerate(docs_or_queries.items()), desc="Building matrix"):
+                idx_to_chunkid[idx] = chunkid
                 norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']])
                 for term, freq in doc['tf'].items():
                     if term in vocab:
@@ -130,7 +130,7 @@ class BM25ChunkRetriever:
                         term_index = vocab[term]
                         matrix[idx, term_index] = freq
                         
-        return csr_matrix(matrix), idx_to_docid
+        return csr_matrix(matrix), idx_to_chunkid
 
     def compute_corpus_statistics(self, tokenized_docs):
         """Compute IDF and average document length for each language"""
