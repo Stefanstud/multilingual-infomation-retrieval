@@ -12,11 +12,13 @@ from scipy import sparse
 import os
 import math
 
-class BM25Retriever:
-    def __init__(self, corpus_path=None, stopwords_path=None):
+class BM25ChunkRetriever:
+    def __init__(self, corpus_path=None, stopwords_path=None, chunk_size=500):
         self.corpus_path = corpus_path
         self.stopwords_path = stopwords_path
+        self.chunk_size = chunk_size
         self.language_stopwords = self._init_stopwords()
+        self.chunk_to_original_doc = defaultdict(dict)
         
     def _init_stopwords(self):
         """Initialize stopwords for all supported languages"""
@@ -53,9 +55,16 @@ class BM25Retriever:
     def tokenize_korean_simple(text):
         return text.split()
     
+    def split_into_chunks(self, docid, text):
+        """Split document into chunks of specified size"""
+        tokens = word_tokenize(text)
+        return [(docid, tokens[i:i + self.chunk_size]) 
+                for i in range(0, len(tokens), self.chunk_size)]
+    
     def tokenize(self, docs):
-        """Tokenize documents or queries"""
+        """Tokenize documents into chunks while tracking original document IDs"""
         tokenized_docs = dict()
+        chunk_counter = 0
         
         for doc in tqdm(docs, desc="Tokenizing"):
             docid = doc['docid']
@@ -63,25 +72,56 @@ class BM25Retriever:
             lang = doc['lang']
             
             text_no_punctuation = "".join([ch for ch in text if ch not in string.punctuation])
+            chunks = self.split_into_chunks(docid, text_no_punctuation)
             
-            if lang == 'ko':
-                tokens = self.tokenize_korean_simple(text_no_punctuation)
-            else:
-                tokens = word_tokenize(text_no_punctuation)
-            
-            stop_words = self.language_stopwords.get(lang, set())
-            filtered_tokens = [word.lower() for word in tokens if word.lower() not in stop_words]
-            
-            tf = Counter(filtered_tokens)
-            
-            tokenized_docs[docid] = {
-                'tf': tf,
-                'doc_len': len(filtered_tokens),
-                'lang': lang,
-            }
+            # Process each chunk
+            for _, chunk_tokens in chunks:
+                if lang != 'ko':
+                    tokens = word_tokenize(" ".join(chunk_tokens))
+                else:
+                    tokens = chunk_tokens
+                
+                stop_words = self.language_stopwords.get(lang, set())
+                filtered_tokens = [word.lower() for word in tokens if word.lower() not in stop_words]
+                
+                tf = Counter(filtered_tokens)
+                
+                # Store chunk with unique ID while maintaining mapping to original doc
+                chunk_id = f"{docid}_chunk_{chunk_counter}"
+                self.chunk_to_original_doc[chunk_id] = docid
+                
+                tokenized_docs[chunk_id] = {
+                    'tf': tf,
+                    'doc_len': len(filtered_tokens),
+                    'lang': lang,
+                }
+                
+                chunk_counter += 1
             
         return tokenized_docs
     
+    def build_sparse_matrix(self, docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=2.0, b=0.7):
+        matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
+        idx_to_docid = {}
+        
+        if not is_query:
+            for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc="Building matrix"):
+                idx_to_docid[idx] = docid
+                norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']])
+                for term, freq in doc['tf'].items():
+                    if term in vocab:
+                        term_index = vocab[term]
+                        tf_adjusted = freq * (k1 + 1) / (freq + norm_factor)
+                        matrix[idx, term_index] = tf_adjusted * idfs[doc['lang']].get(term, 0)
+        else:
+            for idx, (_, query) in enumerate(docs_or_queries.items()):
+                for term, freq in query['tf'].items():
+                    if term in vocab:
+                        term_index = vocab[term]
+                        matrix[idx, term_index] = freq
+                        
+        return csr_matrix(matrix), idx_to_docid
+
     def compute_corpus_statistics(self, tokenized_docs):
         """Compute IDF and average document length for each language"""
         idf_by_lang = defaultdict(lambda: defaultdict(int))
@@ -108,41 +148,11 @@ class BM25Retriever:
             
         return dict(idf_by_lang), avgdl_by_lang
     
-    def build_sparse_matrix(self, docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
-        matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
-        idx_to_docid = {}
-        
-        if not is_query:
-            for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc="Building matrix"):
-                idx_to_docid[idx] = docid
-                norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']])
-                for term, freq in doc['tf'].items():
-                    if term in vocab:
-                        term_index = vocab[term]
-                        tf_adjusted = freq * (k1 + 1) / (freq + norm_factor)
-                        matrix[idx, term_index] = tf_adjusted * idfs[doc['lang']].get(term, 0)
-        else:
-            for idx, (_, query) in enumerate(docs_or_queries.items()):
-                for term, freq in query['tf'].items():
-                    if term in vocab:
-                        term_index = vocab[term]
-                        matrix[idx, term_index] = freq
-                        
-        return csr_matrix(matrix), idx_to_docid
-    
-    @staticmethod
-    def build_vocab(tokenized_corpus):
-        """Build vocabulary from tokenized corpus"""
-        vocab = set()
-        for doc in tokenized_corpus.values():
-            vocab.update(doc['tf'].keys())
-        return {term: idx for idx, term in enumerate(vocab)}
-    
     def retrieve(self, queries, corpus, k=10, cache_dir='../data/'):
-        """Main retrieval function"""
-        tok_corpus_path = os.path.join(cache_dir, 'tokenized_corpus.pkl')
-        bm25_matrix_path = os.path.join(cache_dir, 'bm25_matrix.npz')
-        idx_to_docid_path = os.path.join(cache_dir, 'idx_to_docid.pkl')
+        """Main retrieval function with chunk-aware processing"""
+        tok_corpus_path = os.path.join(cache_dir, 'tokenized_corpus_chunks.pkl')
+        bm25_matrix_path = os.path.join(cache_dir, 'bm25_matrix_chunks.npz')
+        idx_to_chunkid_path = os.path.join(cache_dir, 'idx_to_chunkid.pkl')
         
         query_docs = [
             {'docid': idx, 'text': row['query'], 'lang': row['lang']}
@@ -151,9 +161,11 @@ class BM25Retriever:
         
         if os.path.exists(tok_corpus_path):
             tokenized_corpus = self.load_data(tok_corpus_path)
+            self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
         else:
             tokenized_corpus = self.tokenize(corpus)
             self.save_data(tokenized_corpus, tok_corpus_path)
+            self.save_data(self.chunk_to_original_doc, os.path.join(cache_dir, 'chunk_mapping.pkl'))
             
         tokenized_queries = self.tokenize(query_docs)
         
@@ -162,11 +174,11 @@ class BM25Retriever:
         
         if os.path.exists(bm25_matrix_path):
             bm25_matrix = sparse.load_npz(bm25_matrix_path)
-            idx_to_docid = self.load_data(idx_to_docid_path)
+            idx_to_chunkid = self.load_data(idx_to_chunkid_path)
         else:
-            bm25_matrix, idx_to_docid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
+            bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
             sparse.save_npz(bm25_matrix_path, bm25_matrix)
-            self.save_data(idx_to_docid, idx_to_docid_path)
+            self.save_data(idx_to_chunkid, idx_to_chunkid_path)
             
         query_matrix, _ = self.build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query=True)
         scores_matrix = query_matrix.dot(bm25_matrix.T).toarray()
@@ -174,9 +186,27 @@ class BM25Retriever:
         results = {}
         for i in tqdm(range(len(queries)), desc="Getting top-k results"):
             query_lang = queries.iloc[i]["lang"]
-            lang_mask = np.array([1 if corpus[j]["lang"] == query_lang else 0 for j in range(scores_matrix.shape[1])])
+            lang_mask = np.array([1 if tokenized_corpus[idx_to_chunkid[j]]["lang"] == query_lang else 0 
+                                for j in range(scores_matrix.shape[1])])
+            
             masked_scores = np.where(lang_mask == 1, scores_matrix[i], -np.inf)
-            top_k_idx = np.argsort(masked_scores)[::-1][:k]
-            results[i] = [idx_to_docid[j] for j in top_k_idx]
+            top_k_chunk_idx = np.argsort(masked_scores)[::-1]
+            
+            # Convert chunk IDs back to original document IDs while maintaining uniqueness
+            seen_docs = set()
+            top_k_docs = []
+            
+            for idx in top_k_chunk_idx:
+                chunk_id = idx_to_chunkid[idx]
+                original_doc = self.chunk_to_original_doc[chunk_id]
+                
+                if original_doc not in seen_docs:
+                    top_k_docs.append(original_doc)
+                    seen_docs.add(original_doc)
+                    
+                if len(top_k_docs) == k:
+                    break
+                    
+            results[i] = top_k_docs
             
         return results
