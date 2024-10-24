@@ -190,22 +190,19 @@ def main():
     results_final = {}
     bm25_matrix = {}
 
-    if os.path.exists(BM25_MATRIX_PATH):
-        bm25_matrix = load_data(BM25_MATRIX_PATH)
-        idx_to_docid = load_data(IDX_TO_DOCID_PATH)
-    
     # build vocabulary
     vocab = build_vocab(tokenized_corpus)
 
     # compute corpus stistics
     idfs, avgdls = compute_corpus_statistics(tokenized_corpus)
-
-    print("Corpus ...")
-    # build document and query embeddings using bm25 methodology
-    if not bm25_matrix: # if we have it pre-computed
-        doc_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
-        bm25_matrix = doc_matrix
-
+    
+    # build document and query embeddings using bm25 methodologyprint("Corpus ...")
+    if os.path.exists(BM25_MATRIX_PATH):
+        bm25_matrix = load_data(BM25_MATRIX_PATH)
+        idx_to_docid = load_data(IDX_TO_DOCID_PATH)
+    else:
+        bm25_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
+    
     print("Query ...")
     query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls)
     
@@ -220,6 +217,17 @@ def main():
         top_k_idx = np.argsort(scores_matrix[i])[::-1][:k] # ith query ; get top rated docs
         top_k_idx = [idx_to_docid[j] for j in top_k_idx] 
         results_final[i] = top_k_idx    # save bm25 matrix and idx to docid
+
+
+    for i in tqdm(range(len(test_data)), desc="Sorting results"): 
+        query_lang = test_data.iloc[i]["lang"] 
+        matching_lang_idx = [j for j in range(scores_matrix.shape[1]) 
+                            if doc_metadata[j]["lang"] == query_lang]
+
+        filtered_scores = scores_matrix[i][matching_lang_idx]
+        top_k_idx_in_filtered = np.argsort(filtered_scores)[::-1][:k]
+        top_k_idx = [idx_to_docid[matching_lang_idx[j]] for j in top_k_idx_in_filtered]
+        results_final[i] = top_k_idx 
 
     save_data(bm25_matrix, BM25_MATRIX_PATH)
     save_data(idx_to_docid, IDX_TO_DOCID_PATH)
