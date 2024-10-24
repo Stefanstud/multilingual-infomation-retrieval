@@ -14,6 +14,7 @@ from scipy.sparse import lil_matrix, csr_matrix
 from nltk.tokenize import word_tokenize
 from nltk.corpus import stopwords
 from sentence_transformers import SentenceTransformer, util
+from scipy import sparse
 
 def save_data(data, file_name):
     with open(file_name, 'wb') as f:
@@ -112,7 +113,8 @@ def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query = False, k
             for term, freq in query['tf'].items():
                 if term in vocab:
                     term_index = vocab[term]
-                    matrix[idx, term_index] = freq # * idfs[lang].get(term, 0) # improvement 
+                    matrix[idx, term_index] = freq # * idfs[query['lang']].get(term, 0)
+                    # * idfs[lang].get(term, 0) # improvement 
                     
     return csr_matrix(matrix), idx_to_docid # idx_to_docid useful only for corpus
 
@@ -140,7 +142,7 @@ def bm25_retrieve(dev_data, corpus, k=10):
     nltk.download('stopwords')
     nltk.download('punkt_tab')
     TOK_CORPUS_PATH = '../data/tokenized_corpus.pkl'
-    BM25_MATRIX_PATH = '../data/bm25_matrix.pkl'
+    BM25_MATRIX_PATH = '../data/bm25_matrix.npz'
     IDX_TO_DOCID_PATH = '../data/idx_to_docid.pkl'
 
     # load corpus
@@ -198,11 +200,12 @@ def bm25_retrieve(dev_data, corpus, k=10):
     print("Corpus...")
     # build document and query embeddings using bm25 methodology
     if os.path.exists(BM25_MATRIX_PATH):
-        bm25_matrix = load_data(BM25_MATRIX_PATH)
+        bm25_matrix = sparse.load_npz(BM25_MATRIX_PATH)
         idx_to_docid = load_data(IDX_TO_DOCID_PATH)
     else:
         bm25_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
-    
+        sparse.save_npz(BM25_MATRIX_PATH, bm25_matrix)
+
     print("Query...")
     query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query=True)
 
@@ -261,7 +264,6 @@ with open('../data/corpus.json', 'r', encoding='utf-8') as f:
     corpus = json.load(f)
 
 dev_data = pd.read_csv('../data/dev.csv')
-
 
 
 # Example evaluation using BM25
