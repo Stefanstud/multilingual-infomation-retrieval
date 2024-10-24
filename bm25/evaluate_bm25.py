@@ -1,6 +1,6 @@
 import json
 import pandas as pd
-from bm25_claude import BM25Retriever
+from bm25 import BM25ChunkRetriever
 
 def evaluate_retrieval(queries, corpus, retriever):
     """
@@ -36,7 +36,7 @@ def main():
     
     dev_data = pd.read_csv('../data/dev.csv')
     
-    retriever = BM25Retriever(
+    retriever = BM25ChunkRetriever(
         stopwords_path='../data/stopwords-ko.txt'
     )
     
