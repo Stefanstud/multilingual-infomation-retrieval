@@ -14,6 +14,7 @@ from collections import defaultdict, Counter
 import math
 import pickle
 import os
+from scipy import sparse
 
 def save_data(data, file_name):
     with open(file_name, 'wb') as f:
@@ -115,8 +116,8 @@ def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query = False, k
             for term, freq in query['tf'].items():
                 if term in vocab:
                     term_index = vocab[term]
-                    matrix[idx, term_index] = freq # * idfs[lang].get(term, 0) # improvement 
-                    
+                    matrix[idx, term_index] = freq # * idfs[query['lang']].get(term, 0)
+
     return csr_matrix(matrix), idx_to_docid # idx_to_docid useful only for corpus
 
 # save results to csv
@@ -140,7 +141,7 @@ def build_vocab(tokenized_corpus):
    
 def main():
     TOK_CORPUS_PATH = '../data/tokenized_corpus.pkl'
-    BM25_MATRIX_PATH = '../data/bm25_matrix.pkl'
+    BM25_MATRIX_PATH = '../data/bm25_matrix.npz'
     IDX_TO_DOCID_PATH = '../data/idx_to_docid.pkl'
     nltk.download('punkt')
     nltk.download('stopwords')
@@ -201,7 +202,7 @@ def main():
     print("Corpus...")
     # build document and query embeddings using bm25 methodology
     if os.path.exists(BM25_MATRIX_PATH):
-        bm25_matrix = load_data(BM25_MATRIX_PATH)
+        bm25_matrix = sparse.load_npz(BM25_MATRIX_PATH)
         idx_to_docid = load_data(IDX_TO_DOCID_PATH)
     else:
         bm25_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
@@ -226,8 +227,10 @@ def main():
         top_k_idx = [idx_to_docid[j] for j in top_k_idx]
         results_final[i] = top_k_idx  
 
-    # save_data(bm25_matrix, BM25_MATRIX_PATH)
-    # save_data(idx_to_docid, IDX_TO_DOCID_PATH)
+    # save npz bm25
+    sparse.save_npz(BM25_MATRIX_PATH, bm25_matrix)
+    save_data(idx_to_docid, IDX_TO_DOCID_PATH)
+
     write_submission_csv(results_final, 'submission.csv')
 
 if __name__ == "__main__":
