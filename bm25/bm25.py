@@ -95,7 +95,7 @@ def compute_corpus_statistics(tokenized_docs):
     return idf_by_lang, avgdl_by_lang
 
 
-def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, k1=1.2, b=0.7):
+def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query = False, k1=1.2, b=0.7):
     """Builds a sparse matrix from documents or queries."""
     matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
     idx_to_docid = {} # maps int to docid; 0 -> doc-en-23; 1 -> doc-en-3223 ...
@@ -115,7 +115,7 @@ def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, k1=1.2, b=0.7):
             for term, freq in query['tf'].items():
                 if term in vocab:
                     term_index = vocab[term]
-                    matrix[idx, term_index] = freq
+                    matrix[idx, term_index] = freq # * idfs[lang].get(term, 0) # improvement 
                     
     return csr_matrix(matrix), idx_to_docid # idx_to_docid useful only for corpus
 
@@ -207,7 +207,7 @@ def main():
         bm25_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
     
     print("Query...")
-    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls)
+    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query = True)
 
     scores_matrix = query_matrix.dot(bm25_matrix.T)
     scores_matrix = scores_matrix.toarray() # convert from compressed sparse matrix to dense matrix  
