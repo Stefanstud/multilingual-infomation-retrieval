@@ -101,6 +101,15 @@ class BM25ChunkRetriever:
             
         return tokenized_docs
     
+    def build_vocab(self, tokenized_corpus):
+        """ Builds a vocabulary from the tokenized corpus. This can also be loaded from this to have a faster runtime"""
+        print("Building vocab...")
+        vocab = set()
+        for doc in tokenized_corpus.values():
+            vocab.update(doc['tf'].keys())
+        vocab = {term: idx for idx, term in enumerate(vocab)}
+        return vocab
+
     def build_sparse_matrix(self, docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
         matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
         idx_to_docid = {}
