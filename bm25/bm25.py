@@ -206,7 +206,7 @@ def main():
     print("Query ...")
     query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls)
     
-    scores_matrix = query_matrix.dot(doc_matrix.T)
+    scores_matrix = query_matrix.dot(bm25_matrix.T)
     scores_matrix = scores_matrix.toarray() # convert from compressed sparse matrix to dense matrix  
     print("Scores computed, getting top_k results...")
     
