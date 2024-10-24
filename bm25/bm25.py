@@ -95,14 +95,14 @@ def compute_corpus_statistics(tokenized_docs):
     return idf_by_lang, avgdl_by_lang
 
 
-def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=1.2, b=0.7):
+def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, k1=1.2, b=0.7):
     """Builds a sparse matrix from documents or queries."""
     matrix = lil_matrix((len(docs_or_queries), len(vocab)), dtype=np.float32)
     idx_to_docid = {} # maps int to docid; 0 -> doc-en-23; 1 -> doc-en-3223 ...
      
     if not is_query:
-        # idx is used to index the lil_matrix (instead of docid) since it does not accept str as index
-        for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc = "Building embeddings"):  # example
+    # idx is used to index the lil_matrix (instead of docid) since it does not accept str as index
+        for idx, (docid, doc) in tqdm(enumerate(docs_or_queries.items()), desc = "Building embeddings"):  
             idx_to_docid[idx] = docid # 0 -> doc-en-23; 1 -> doc-en-3223 ...
             norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']]) 
             for term, freq in doc['tf'].items():
@@ -115,10 +115,8 @@ def build_sparse_matrix(docs_or_queries, vocab, idfs, avgdl, is_query=False, k1=
             for term, freq in query['tf'].items():
                 if term in vocab:
                     term_index = vocab[term]
-                    matrix[idx, term_index] = freq  
-                    tf_adjusted = freq * (k1 + 1) / (freq + k1)  # No length normalization for queries
-                    matrix[idx, term_index] = tf_adjusted * idfs[query['lang']].get(term, 0)
-
+                    matrix[idx, term_index] = freq
+                    
     return csr_matrix(matrix), idx_to_docid # idx_to_docid useful only for corpus
 
 # save results to csv
@@ -153,14 +151,17 @@ def main():
     if not os.path.exists(TOK_CORPUS_PATH):
         with open('../data/corpus.json', 'r', encoding='utf-8') as f:
             corpus = json.load(f)
-
+    else:
+        with open('../data/corpus.json', 'r', encoding='utf-8') as f:
+            corpus = json.load(f)
+        
     # from txt load korean stopwords
     with open('../data/stopwords-ko.txt', 'r', encoding='utf-8') as f:
         stopwords_ko = f.read().splitlines()
 
     # load test data
     test_data = pd.read_csv('../data/test.csv')
-
+    
     # prepare test queries in a similar format as the corpus
     test_queries = [
         {'docid': row['id'], 'text': row['query'], 'lang': row['lang']}
@@ -198,7 +199,7 @@ def main():
     idfs, avgdls = compute_corpus_statistics(tokenized_corpus)
     
     print("Corpus...")
-    # build document and query embeddings using bm25 methodologyprint("Corpus ...")
+    # build document and query embeddings using bm25 methodology
     if os.path.exists(BM25_MATRIX_PATH):
         bm25_matrix = load_data(BM25_MATRIX_PATH)
         idx_to_docid = load_data(IDX_TO_DOCID_PATH)
@@ -206,8 +207,8 @@ def main():
         bm25_matrix, idx_to_docid = build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls)
     
     print("Query...")
-    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query=True)
-    
+    query_matrix, _ = build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls)
+
     scores_matrix = query_matrix.dot(bm25_matrix.T)
     scores_matrix = scores_matrix.toarray() # convert from compressed sparse matrix to dense matrix  
     print("Scores computed, getting top_k results...")
@@ -215,13 +216,18 @@ def main():
     # top 10 documents, save in results_final dict
     k = 10
     results_final = {}
-    for i in tqdm(range(len(test_data)), desc = "Sorting results"): 
-        top_k_idx = np.argsort(scores_matrix[i])[::-1][:k] # ith query ; get top rated docs
-        top_k_idx = [idx_to_docid[j] for j in top_k_idx] 
-        results_final[i] = top_k_idx    # save bm25 matrix and idx to docid
+    for i in tqdm(range(len(test_data)), desc="Sorting results"): 
+        query_lang = test_data.iloc[i]["lang"]  
+        lang_mask = np.array([1 if corpus[j]["lang"] == query_lang else 0 for j in range(scores_matrix.shape[1])])
+        masked_scores = np.where(lang_mask == 1, scores_matrix[i], -np.inf)
+        top_k_idx = np.argsort(masked_scores)[::-1][:k]
 
-    save_data(bm25_matrix, BM25_MATRIX_PATH)
-    save_data(idx_to_docid, IDX_TO_DOCID_PATH)
+        # Map indices to document IDs
+        top_k_idx = [idx_to_docid[j] for j in top_k_idx]
+        results_final[i] = top_k_idx  
+
+    # save_data(bm25_matrix, BM25_MATRIX_PATH)
+    # save_data(idx_to_docid, IDX_TO_DOCID_PATH)
     write_submission_csv(results_final, 'submission.csv')
 
 if __name__ == "__main__":
