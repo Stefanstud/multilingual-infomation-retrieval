@@ -260,9 +260,6 @@ def evaluate(dev_data, corpus):
 with open('../data/corpus.json', 'r', encoding='utf-8') as f:
     corpus = json.load(f)
 
-# get the 1% of the corpus
-corpus = corpus[:int(len(corpus) * 0.003)]
-
 dev_data = pd.read_csv('../data/dev.csv')
 
 
