@@ -4,6 +4,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import recall_score
 from scipy.sparse import load_npz, vstack
 import pickle
+from bm25 import build_sparse_matrix, tokenize
+from sklearn.metrics import log_loss
+from tqdm import tqdm
 
 TRAIN_DATA_PATH = '../data/train.csv'
 DEV_DATA_PATH = '../data/dev.csv'
@@ -22,19 +25,15 @@ docid_to_idx = {}
 for lang in idx_to_docid:
     docid_to_idx[lang] = {v: k for k, v in idx_to_docid[lang].items()}
 
-def create_training_data(train_data, bm25_matrices, docid_to_idx):
+def create_training_data(data, bm25_matrices, docid_to_idx):
     features = []
     labels = []
-    for index, row in train_data.iterrows():
-        query_id = row['query_id']
+    for index, row in tqdm(data.iterrows(), total=data.shape[0], desc="Processing data"):
+        query = row['query']
+        query_lang = row['lang']
         pos_doc_id = row['positive_docs']
         neg_doc_ids = eval(row['negative_docs'])  
-        query_lang = row['lang']  
-
-        if query_lang in bm25_matrices:
-            lang_matrix = bm25_matrices[query_lang]
-        else:
-            continue  
+        lang_matrix = bm25_matrices[query_lang]
 
         pos_features = lang_matrix.getrow(docid_to_idx[query_lang][pos_doc_id]).toarray().flatten()
         for neg_doc_id in neg_doc_ids:

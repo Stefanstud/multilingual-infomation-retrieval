@@ -26,15 +26,13 @@ import pickle
 
 # Load data
 test = pd.read_csv("data/test.csv")
-model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code = True)
+model = SentenceTransformer("all-mpnet-base-v2", trust_remote_code = True)
 
-
-DOC_EMBEDDINGS_DIR = "embeddings_gte_chunking.pt"
+DOC_EMBEDDINGS_DIR = "embeddings_omg_chunked.pt"
 # check if bert_document_embeddings.pt file exists
 if os.path.isfile(f'{DOC_EMBEDDINGS_DIR}'):
     print("Loading the document embeddings from the existing .pt file...")
     documents = torch.load(f'{DOC_EMBEDDINGS_DIR}')
-
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
@@ -55,8 +53,8 @@ for index, row in tqdm(test.iterrows(), total=test.shape[0], desc="Encoding quer
 
 print("Query encoding complete.")
 final_matrix = final_matrix.to(device)
-doc_ids = documents['docids']  # Assuming these are already in an appropriate format (list or tensor)
-doc_langs = documents['langs']  # This should be indices or converted if they are still strings
+doc_ids = documents['docids']  
+doc_langs = documents['langs']  
 
 unique_langs = sorted(set(test['lang']))  # Ensure all possible languages are included
 lang_to_index = {lang: idx for idx, lang in enumerate(unique_langs)}
@@ -76,7 +74,7 @@ for i in tqdm(range(0, len(test), batch_size), desc="Retrieving documents"):
     for j, lang_index in enumerate(batch_langs):
         seen_doc_ids = set()
         unique_results = []
-        k = 500
+        k = 1000
         increment = 5
 
         lang_mask = (doc_lang_indices == lang_index).float()  # Convert bool mask to float
@@ -104,7 +102,6 @@ def write_submission_csv(results_final, output_path):
             # Format the docids as a string that looks like a Python list
             docids = ', '.join([f"'{docid}'" for docid in row])
             writer.writerow([id, f"[{docids}]"])
-
 
 output_path = 'submission.csv'
 write_submission_csv(results_final, output_path)
