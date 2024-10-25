@@ -62,13 +62,18 @@ class BM25ChunkRetriever:
         with open(file_name, 'rb') as f:
             return pickle.load(f)
 
-    def split_into_chunks(self, docid, text):
+    def split_into_chunks(self, docid, text, is_query=False):
         """Split document into chunks of specified size"""
+
+        if is_query:
+            chunk_size = len(text)
+        else:
+            chunk_size = self.chunk_size
+
         tokens = word_tokenize(text)
-        return [(docid, tokens[i:i + self.chunk_size]) 
-                for i in range(0, len(tokens), self.chunk_size)]
-    
-    def tokenize(self, docs, is_query=False):
+        return [(docid, tokens[i:i + chunk_size]) 
+                for i in range(0, len(tokens), chunk_size)]
+  
     def tokenize(self, docs, is_query=False):
         """Tokenize documents into chunks while tracking original document IDs"""
         tokenized_docs = dict()
@@ -80,7 +85,7 @@ class BM25ChunkRetriever:
             lang = doc['lang']
             
             text_no_punctuation = "".join([ch for ch in text if ch not in string.punctuation])
-            chunks = self.split_into_chunks(docid, text_no_punctuation)
+            chunks = self.split_into_chunks(docid, text_no_punctuation, is_query)
             
             # Process each chunk
             for _, chunk_tokens in chunks:
