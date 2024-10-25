@@ -148,7 +148,6 @@ class BM25ChunkRetriever:
                         matrix[idx, term_index] = freq
                         
         return csr_matrix(matrix), idx_to_chunkid
-        return csr_matrix(matrix), idx_to_chunkid
 
     def compute_corpus_statistics(self, tokenized_docs):
         """Compute IDF and average document length for each language"""
@@ -187,15 +186,14 @@ class BM25ChunkRetriever:
             for idx, row in queries.iterrows()
         ]
         
-        if os.path.exists(tok_corpus_path):
-            tokenized_corpus = self.load_data(tok_corpus_path)
-            self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
-        else:
-            tokenized_corpus = self.tokenize(corpus)
-            self.save_data(tokenized_corpus, tok_corpus_path)
-            self.save_data(self.chunk_to_original_doc, os.path.join(cache_dir, 'chunk_mapping.pkl'))
+        # if os.path.exists(tok_corpus_path):
+        #     tokenized_corpus = self.load_data(tok_corpus_path)
+        #     self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
+        # else:
+        tokenized_corpus = self.tokenize(corpus)
+            # self.save_data(tokenized_corpus, tok_corpus_path)
+            # self.save_data(self.chunk_to_original_doc, os.path.join(cache_dir, 'chunk_mapping.pkl'))
             
-        tokenized_queries = self.tokenize(query_docs, is_query=True)
         tokenized_queries = self.tokenize(query_docs, is_query=True)
         
         vocab = self.build_vocab(tokenized_corpus)
@@ -241,15 +239,6 @@ class BM25ChunkRetriever:
             results[i] = top_k_docs
             
         return results
-    
-    def create_submission_csv(self, test_data, corpus, output_path):
-        results = self.retrieve(test_data, corpus)
-        with open(output_path, 'w', newline='') as csvfile:
-            writer = csv.writer(csvfile)
-            writer.writerow(['id', 'docids'])
-            for idx, docs in results.items():
-                # save as list like this: 0,"['doc-en-0', 'doc-de-14895', 'doc-en-829265', 'doc-en-147113', 'doc-en-644359', 'doc-en-585315', 'doc-en-234047', 'doc-en-14117', 'doc-en-794977', 'doc-en-374766']"
-                writer.writerow([idx, str(docs)])
     
     def create_submission_csv(self, test_data, corpus, output_path):
         results = self.retrieve(test_data, corpus)
