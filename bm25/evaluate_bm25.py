@@ -55,7 +55,7 @@ def evaluate_retrieval(queries, corpus, retriever):
     # weighted average (en has 0.8 weight, and each of the other languages has 0.2 weight)
     weighted_avg = {
         'recall_at_1': 0.4 * results_per_lang['en']['recall_at_1'] + 0.6 * np.mean([v['recall_at_1'] for k, v in results_per_lang.items() if k != 'en']),
-        'top_10_accuracy': 0.8 * results_per_lang['en']['top_10_accuracy'] + 0.6 * np.mean([v['top_10_accuracy'] for k, v in results_per_lang.items() if k != 'en']),
+        'top_10_accuracy': 0.4 * results_per_lang['en']['top_10_accuracy'] + 0.6 * np.mean([v['top_10_accuracy'] for k, v in results_per_lang.items() if k != 'en']),
         'averaging': 'weighted'
     }
         
