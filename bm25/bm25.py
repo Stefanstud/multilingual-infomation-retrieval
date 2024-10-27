@@ -11,11 +11,11 @@ from scipy.sparse import lil_matrix, csr_matrix
 from scipy import sparse
 import os
 import csv
-import csv
 import math
 from nltk.tokenize import word_tokenize
 import spacy
 from nltk.stem.snowball import SnowballStemmer
+import sys 
 
 class BM25ChunkRetriever:
     def __init__(self, corpus_path=None, stopwords_path=None, chunk_size=500, k1 = 1.2, b = 0.7):
@@ -25,17 +25,17 @@ class BM25ChunkRetriever:
         self.language_stopwords = self._init_stopwords()
         self.chunk_to_original_doc = defaultdict(str)
         self.de_stemmer = SnowballStemmer("german")
-        # download spacy spacy download de_core_news_sm
-        self.nlp_de = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
-        self.nlp_ko = spacy.load('ko_core_news_sm', disable=['parser', 'ner'])
+        # # download spacy spacy download de_core_news_sm
+        # self.nlp_de = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
+        # self.nlp_ko = spacy.load('ko_core_news_sm', disable=['parser', 'ner'])
         self.k1 = k1
         self.b = b
 
     def _init_stopwords(self):
         """Initialize stopwords for all supported languages"""
-        nltk.download('punkt')
-        nltk.download('stopwords')
-        nltk.download('punkt_tab')
+        # nltk.download('punkt')
+        # nltk.download('stopwords')
+        # nltk.download('punkt_tab')
         
         language_stopwords = {
             "en": set(stopwords.words('english')),
@@ -174,54 +174,113 @@ class BM25ChunkRetriever:
             idf_by_lang[lang] = idf
             
         return dict(idf_by_lang), avgdl_by_lang
-    
-    def retrieve(self, queries, corpus, k=10, cache_dir='../data/'):
-        """Main retrieval function with chunk-aware processing"""
-        tok_corpus_path = os.path.join(cache_dir, 'tokenized_corpus_chunks.pkl')
-        bm25_matrix_path = os.path.join(cache_dir, 'bm25_matrix_chunks.npz')
-        idx_to_chunkid_path = os.path.join(cache_dir, 'idx_to_chunkid.pkl')
         
+    def precompute(self, corpus, cache_dir='../data/'):
+        """Precompute all necessary components for retrieval"""
+        tok_corpus_path = os.path.join(cache_dir, 'tokenized_corpus_chunks.pkl')
+        
+        # Tokenize corpus and save chunk mapping
+        if os.path.exists(tok_corpus_path):
+            tokenized_corpus = self.load_data(tok_corpus_path)
+            self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
+        else:                
+            tokenized_corpus = self.tokenize(corpus)
+            self.save_data(tokenized_corpus, tok_corpus_path)
+            self.save_data(self.chunk_to_original_doc, os.path.join(cache_dir, 'chunk_mapping.pkl'))
+        
+        # Build or load vocabulary
+        if os.path.exists(os.path.join(cache_dir, 'vocab.pkl')):
+            vocab = self.load_data(os.path.join(cache_dir, 'vocab.pkl'))
+        else:
+            vocab = self.build_vocab(tokenized_corpus)
+            self.save_data(vocab, os.path.join(cache_dir, 'vocab.pkl'))
+        
+        # Compute or load statistics
+        if os.path.exists(os.path.join(cache_dir, 'idfs.pkl')):
+            idfs = self.load_data(os.path.join(cache_dir, 'idfs.pkl'))
+            avgdls = self.load_data(os.path.join(cache_dir, 'avgdls.pkl'))
+        else:
+            idfs, avgdls = self.compute_corpus_statistics(tokenized_corpus)
+            self.save_data(idfs, os.path.join(cache_dir, 'idfs.pkl'))
+            self.save_data(avgdls, os.path.join(cache_dir, 'avgdls.pkl'))
+        
+        # # Build and save BM25 matrix
+        # if os.path.exists(os.path.join(cache_dir, 'bm25_matrix.npz')):
+        #     bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
+        #     idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
+        # else:
+        bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
+            # sparse.save_npz(os.path.join(cache_dir, 'bm25_matrix.npz'), bm25_matrix)
+            # self.save_data(idx_to_chunkid, os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
+        
+        # Build and save language masks
+        if not os.path.exists(os.path.join(cache_dir, 'lang_masks.pkl')):
+            unique_langs = ['en', 'de', 'fr', 'es', 'it', 'ar', 'ko']
+            lang_masks = {}
+            for lang in unique_langs:
+                lang_masks[lang] = np.array([1 if tokenized_corpus[idx_to_chunkid[j]]["lang"] == lang else 0 
+                                        for j in range(len(tokenized_corpus))])
+            self.save_data(lang_masks, os.path.join(cache_dir, 'lang_masks.pkl'))
+        else:
+            lang_masks = self.load_data(os.path.join(cache_dir, 'lang_masks.pkl'))
+        
+        return {
+            'tokenized_corpus': tokenized_corpus,
+            'vocab': vocab,
+            'idfs': idfs,
+            'avgdls': avgdls,
+            'bm25_matrix': bm25_matrix,
+            'idx_to_chunkid': idx_to_chunkid,
+            'lang_masks': lang_masks
+        }
+
+    def retrieve(self, queries, corpus, k=10, cache_dir='../data/'):
+        """Retrieve documents using precomputed components"""
+        # if any of the files are missing, precompute them
+        if not all([
+            os.path.exists(os.path.join(cache_dir, 'vocab.pkl')),
+            os.path.exists(os.path.join(cache_dir, 'idfs.pkl')),
+            os.path.exists(os.path.join(cache_dir, 'avgdls.pkl')),
+            not os.path.exists(os.path.join(cache_dir, 'bm25_matrix.npz')), # TODO change to back
+            os.path.exists(os.path.join(cache_dir, 'idx_to_chunkid.pkl')),
+            os.path.exists(os.path.join(cache_dir, 'lang_masks.pkl')),
+            os.path.exists(os.path.join(cache_dir, 'chunk_mapping.pkl'))
+        ]):
+            precomputed = self.precompute(corpus, cache_dir)
+            vocab, idfs, avgdls, bm25_matrix, idx_to_chunkid, lang_masks = (
+                precomputed['vocab'], precomputed['idfs'], precomputed['avgdls'],
+                precomputed['bm25_matrix'], precomputed['idx_to_chunkid'], precomputed['lang_masks']
+            )
+
+        else:
+            vocab = self.load_data(os.path.join(cache_dir, 'vocab.pkl'))
+            idfs = self.load_data(os.path.join(cache_dir, 'idfs.pkl'))
+            avgdls = self.load_data(os.path.join(cache_dir, 'avgdls.pkl'))
+            bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
+            idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
+            bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
+            lang_masks = self.load_data(os.path.join(cache_dir, 'lang_masks.pkl'))
+            self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
+            
+        # Process queries
         query_docs = [
             {'docid': idx, 'text': row['query'], 'lang': row['lang']}
             for idx, row in queries.iterrows()
         ]
-        
-        # if os.path.exists(tok_corpus_path):
-        #     tokenized_corpus = self.load_data(tok_corpus_path)
-        #     self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
-        # else:
-        tokenized_corpus = self.tokenize(corpus)
-            # self.save_data(tokenized_corpus, tok_corpus_path)
-            # self.save_data(self.chunk_to_original_doc, os.path.join(cache_dir, 'chunk_mapping.pkl'))
-            
         tokenized_queries = self.tokenize(query_docs, is_query=True)
         
-        vocab = self.build_vocab(tokenized_corpus)
-        idfs, avgdls = self.compute_corpus_statistics(tokenized_corpus)
-        
-        # if os.path.exists(bm25_matrix_path):
-        #     bm25_matrix = sparse.load_npz(bm25_matrix_path)
-        #     idx_to_chunkid = self.load_data(idx_to_chunkid_path)
-        # else:
-        bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1 = self.k1, b = self.b)
-            # sparse.save_npz(bm25_matrix_path, bm25_matrix)
-            # self.save_data(idx_to_chunkid, idx_to_chunkid_path)
-            
-        query_matrix, _ = self.build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, is_query=True, k1 = self.k1, b = self.b)
+        # Build query matrix and get scores
+        query_matrix, _ = self.build_sparse_matrix(tokenized_queries, vocab, idfs, avgdls, 
+                                                is_query=True, k1=self.k1, b=self.b)
         scores_matrix = query_matrix.dot(bm25_matrix.T).toarray()
-
-
-        unique_langs = queries['lang'].unique()
-        lang_masks = {}
-        for lang in unique_langs:
-            lang_masks[lang] = np.array([1 if tokenized_corpus[idx_to_chunkid[j]]["lang"] == lang else 0 
-                                    for j in range(scores_matrix.shape[1])])
         
+        # Get results
         results = {}
         for i in tqdm(range(len(queries)), desc="Getting top-k results"):
             query_lang = queries.iloc[i]["lang"]
             masked_scores = np.where(lang_masks[query_lang] == 1, scores_matrix[i], -np.inf)
             top_k_chunk_idx = np.argsort(masked_scores)[::-1]
+            
             seen_docs = set()
             top_k_docs = []
             
@@ -237,7 +296,7 @@ class BM25ChunkRetriever:
                     break
                     
             results[i] = top_k_docs
-            
+        
         return results
     
     def create_submission_csv(self, test_data, corpus, output_path):
