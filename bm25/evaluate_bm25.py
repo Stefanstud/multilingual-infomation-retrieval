@@ -52,8 +52,17 @@ def evaluate_retrieval(queries, corpus, retriever):
         'averaging': 'micro'
     }
 
+    # weighted average (en has 0.8 weight, and each of the other languages has 0.2 weight)
+    weighted_avg = {
+        'recall_at_1': 0.4 * results_per_lang['en']['recall_at_1'] + 0.6 * np.mean([v['recall_at_1'] for k, v in results_per_lang.items() if k != 'en']),
+        'top_10_accuracy': 0.8 * results_per_lang['en']['top_10_accuracy'] + 0.6 * np.mean([v['top_10_accuracy'] for k, v in results_per_lang.items() if k != 'en']),
+        'averaging': 'weighted'
+    }
+        
+
     results_per_lang['macro_average'] = macro_avg
     results_per_lang['micro_average'] = micro_avg
+    results_per_lang['weighted_average'] = weighted_avg
 
     return results_per_lang
 
@@ -143,6 +152,16 @@ def main():
 
     dev_data = pd.read_csv('../data/dev.csv')
     
+
+    ## For evaluation
+    # retriever = BM25ChunkRetriever(
+    #     stopwords_path='../data/stopwords-ko.txt'
+    # )
+    # results = evaluate_retrieval(dev_data, corpus, retriever)
+    # print("\n BM25 Results per Language:")
+    # print(pd.DataFrame(results).T)
+
+    ## For grid search
     # Define parameter ranges
     k1_range = np.arange(0.7, 1.9, 0.3)  # 0.7 to 2.0 with 0.3 increments
     b_range = np.array([0.3, 0.5, 0.75, 0.9])  # Common values focused around typical good performance

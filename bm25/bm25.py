@@ -84,22 +84,25 @@ class BM25ChunkRetriever:
             text = doc['text']
             lang = doc['lang']
             
-            text_no_punctuation = "".join([ch for ch in text if ch not in string.punctuation])
-            chunks = self.split_into_chunks(docid, text_no_punctuation, is_query)
+            chunks = self.split_into_chunks(docid, text, is_query)
             
             # Process each chunk
             for _, chunk_tokens in chunks:
                 tokens = chunk_tokens
                 stop_words = self.language_stopwords.get(lang, set())
                 filtered_tokens = [word.lower() for word in tokens if word.lower() not in stop_words]
+
+                # remove punctuation
+                filtered_tokens = [word for word in filtered_tokens if word not in string.punctuation]
+
+                # stemming
+                if lang == "de":
+                    filtered_tokens = [self.de_stemmer.stem(word) for word in filtered_tokens]
+
                 
                 tf = Counter(filtered_tokens)
                 
                 # Store chunk with unique ID while maintaining mapping to original doc
-                chunk_id = chunk_counter
-
-                if not is_query:
-                    self.chunk_to_original_doc[chunk_counter] = docid
                 chunk_id = chunk_counter
 
                 if not is_query:
@@ -130,8 +133,6 @@ class BM25ChunkRetriever:
         idx_to_chunkid = {}
         
         if not is_query:
-            for idx, (chunkid, doc) in tqdm(enumerate(docs_or_queries.items()), desc="Building matrix"):
-                idx_to_chunkid[idx] = chunkid
             for idx, (chunkid, doc) in tqdm(enumerate(docs_or_queries.items()), desc="Building matrix"):
                 idx_to_chunkid[idx] = chunkid
                 norm_factor = k1 * (1 - b + b * doc['doc_len'] / avgdl[doc['lang']])
@@ -253,14 +254,16 @@ class BM25ChunkRetriever:
             )
 
         else:
-            vocab = self.load_data(os.path.join(cache_dir, 'vocab.pkl'))
-            idfs = self.load_data(os.path.join(cache_dir, 'idfs.pkl'))
-            avgdls = self.load_data(os.path.join(cache_dir, 'avgdls.pkl'))
-            bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
-            idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
-            bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
-            lang_masks = self.load_data(os.path.join(cache_dir, 'lang_masks.pkl'))
-            self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
+            # vocab = self.load_data(os.path.join(cache_dir, 'vocab.pkl'))
+            # idfs = self.load_data(os.path.join(cache_dir, 'idfs.pkl'))
+            # avgdls = self.load_data(os.path.join(cache_dir, 'avgdls.pkl'))
+            # bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
+            # idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
+            # bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
+            # lang_masks = self.load_data(os.path.join(cache_dir, 'lang_masks.pkl'))
+            # self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
+            # raise error in else block
+            raise ValueError("Some precomputed files are missing. Please re-run with precompute=True")
             
         # Process queries
         query_docs = [
@@ -275,6 +278,7 @@ class BM25ChunkRetriever:
         scores_matrix = query_matrix.dot(bm25_matrix.T).toarray()
         
         # Get results
+        results = {}
         for i in tqdm(range(len(queries)), desc="Getting top-k results"):
             query_lang = queries.iloc[i]["lang"]
             masked_scores = np.where(lang_masks[query_lang] == 1, scores_matrix[i], -np.inf)
@@ -288,7 +292,7 @@ class BM25ChunkRetriever:
 
             for idx in top_k_chunk_idx:
                 chunk_id = idx_to_chunkid[idx]
-                original_doc = chunk_to_original_doc[chunk_id]
+                original_doc = self.chunk_to_original_doc[chunk_id]
 
                 if original_doc not in seen_docs:
                     top_k_docs.append(original_doc)
