@@ -275,28 +275,30 @@ class BM25ChunkRetriever:
         scores_matrix = query_matrix.dot(bm25_matrix.T).toarray()
         
         # Get results
-        results = {}
         for i in tqdm(range(len(queries)), desc="Getting top-k results"):
             query_lang = queries.iloc[i]["lang"]
             masked_scores = np.where(lang_masks[query_lang] == 1, scores_matrix[i], -np.inf)
-            top_k_chunk_idx = np.argsort(masked_scores)[::-1]
+            
+            # get top-k; *20 as heuristic 
+            top_k_chunk_idx = np.argpartition(masked_scores, -k)[-k*20:]
+            top_k_chunk_idx = top_k_chunk_idx[np.argsort(masked_scores[top_k_chunk_idx])[::-1]]
             
             seen_docs = set()
             top_k_docs = []
-            
+
             for idx in top_k_chunk_idx:
                 chunk_id = idx_to_chunkid[idx]
-                original_doc = self.chunk_to_original_doc[chunk_id]
-                
+                original_doc = chunk_to_original_doc[chunk_id]
+
                 if original_doc not in seen_docs:
                     top_k_docs.append(original_doc)
                     seen_docs.add(original_doc)
-                    
+
                 if len(top_k_docs) == k:
                     break
-                    
+
             results[i] = top_k_docs
-        
+
         return results
     
     def create_submission_csv(self, test_data, corpus, output_path):
