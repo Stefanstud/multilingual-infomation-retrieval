@@ -81,8 +81,11 @@ def cosine_similarity(doc1, doc2, norm1, norm2):
     return dot_product / (norm1 * norm2)
 
 def retrieve_top_docs_batch(queries, tfidf_matrix, top_n=10):
-    queries_tfidf = vectori,zer.transform(queries)
-    similarities = cosine_similarity(queries_tfidf, tfidf_matrix)
+
+    # compute term frequencies for queries
+    queries_tf = [compute_tf(query) for query in queries]
+
+    similarities = cosine_similarity(queries_tf, tfidf_matrix)
     top_docs_batch = []
     for sim in similarities:
         top_indices = sim.argsort()[-top_n:][::-1]
