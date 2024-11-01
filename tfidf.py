@@ -23,11 +23,15 @@ def compute_tf(text):
     word_count = defaultdict(int)
     for word in words:
         word_count[word] += 1
-    tf_dict = {word: count / len(words) for word, count in word_count.items()}
+
+    # get max frequency
+    max_freq = max(word_count.values())
+
+    # normalize term frequencies
+    tf_dict = {word: count / max_freq for word, count in word_count.items()}
     return tf_dict
 
 def compute_idf(documents):
-    """ Assume documents is a list of dictionaries of term frequencies """
     N = len(documents)
     idf_dict = defaultdict(lambda: math.log(N + 1))
     all_terms = set(term for doc in documents for term in doc.keys())
