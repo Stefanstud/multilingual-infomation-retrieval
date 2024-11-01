@@ -26,9 +26,12 @@ import pickle
 
 # Load data
 test = pd.read_csv("data/test.csv")
-model = SentenceTransformer("all-mpnet-base-v2", trust_remote_code = True)
+model = SentenceTransformer("Alibaba-NLP/gte-multilingual-base", trust_remote_code = True)
 
-DOC_EMBEDDINGS_DIR = "embeddings_omg_chunked.pt"
+with open('data/corpus.json', 'r') as file:
+    corpus = json.load(file)
+
+DOC_EMBEDDINGS_DIR = "embedding/gte_multilingual_embeddings.pt"
 # check if bert_document_embeddings.pt file exists
 if os.path.isfile(f'{DOC_EMBEDDINGS_DIR}'):
     print("Loading the document embeddings from the existing .pt file...")
@@ -38,30 +41,30 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 model.eval()
 
-document_embeddings = torch.tensor(documents["embeddings"]).to(device)  # Convert and move in one step
+document_embeddings =  documents # torch.tensor(documents["embeddings"]).to(device) 
 final_matrix = torch.zeros((len(test), document_embeddings.shape[1]), device=device)
 
 # Process each query
 for index, row in tqdm(test.iterrows(), total=test.shape[0], desc="Encoding queries"):
     query = row['query']
 
-    with torch.no_grad():  # Deactivate autograd for inference
+    with torch.no_grad():  
         query_vector = model.encode(query)
-        query_vector = torch.tensor(query_vector, dtype=torch.float).to(device)  # Convert and move in one step
+        query_vector = torch.tensor(query_vector, dtype=torch.float).to(device) 
 
-    final_matrix[index] = query_vector.squeeze().detach() # Ensure vector is detached and squeezed
+    final_matrix[index] = query_vector.squeeze().detach() 
 
 print("Query encoding complete.")
 final_matrix = final_matrix.to(device)
-doc_ids = documents['docids']  
-doc_langs = documents['langs']  
+doc_ids = [doc['docid'] for doc in corpus]
+doc_langs = [doc['lang'] for doc in corpus]
 
-unique_langs = sorted(set(test['lang']))  # Ensure all possible languages are included
+unique_langs = sorted(set(test['lang']))  
 lang_to_index = {lang: idx for idx, lang in enumerate(unique_langs)}
 
 # Convert language strings in documents and tests to indices
 doc_lang_indices = torch.tensor([lang_to_index[lang] for lang in doc_langs], dtype=torch.long, device=device)
-test_lang_indices = [lang_to_index[lang] for lang in test['lang']]  # This will be used in the loop
+test_lang_indices = [lang_to_index[lang] for lang in test['lang']] 
 
 results_final = []
 batch_size = 1
@@ -74,7 +77,7 @@ for i in tqdm(range(0, len(test), batch_size), desc="Retrieving documents"):
     for j, lang_index in enumerate(batch_langs):
         seen_doc_ids = set()
         unique_results = []
-        k = 1000
+        k = 10
         increment = 5
 
         lang_mask = (doc_lang_indices == lang_index).float()  # Convert bool mask to float
@@ -99,7 +102,6 @@ def write_submission_csv(results_final, output_path):
         writer.writerow(['id', 'docids']) 
         
         for id, row in enumerate(results_final):
-            # Format the docids as a string that looks like a Python list
             docids = ', '.join([f"'{docid}'" for docid in row])
             writer.writerow([id, f"[{docids}]"])
 

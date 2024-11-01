@@ -64,17 +64,15 @@ def extract_embeddings(data_loader, model):
     return torch.stack(all_embeddings), doc_ids, langs
 
 # Load sentence encoder model
-model_name_or_path="all-mpnet-base-v2"
+model_name_or_path="Alibaba-NLP/gte-multilingual-base"
 model = SentenceTransformer(model_name_or_path, trust_remote_code=True)
-# model_name_or_path='intfloat/multilingual-e5-small'
-# model = SentenceTransformer(model_name_or_path)
 print(f"Loaded model: {model_name_or_path}")
 model.to(torch.device('cuda'))
 print(f"Moved model to device: {model.device}")
 
 # Choose whether to use chunks or whole documents
-USE_CHUNKS = True  # Set to False to use whole documents
-WORDS_PER_CHUNK = 200 if USE_CHUNKS else None
+USE_CHUNKS = False  # Set to False to use whole documents
+WORDS_PER_CHUNK = 500 if USE_CHUNKS else None
 
 # Prepare the dataset and data loader
 dataset = TextDataset('data/corpus.json', use_chunks=USE_CHUNKS, words_per_chunk=WORDS_PER_CHUNK)
@@ -86,6 +84,6 @@ data_loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 embeddings, doc_ids, langs = extract_embeddings(data_loader, model)
 
-output_file = 'embeddings_omg_chunked.pt' if USE_CHUNKS else 'embeddings_omg.pt'
+output_file = 'embeddings_gte.pt' if USE_CHUNKS else 'embeddings_gte.pt'
 torch.save({'embeddings': embeddings, 'docids': doc_ids, 'langs': langs}, output_file)
 print(f"Embeddings and doc IDs saved to {output_file}")
