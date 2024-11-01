@@ -85,7 +85,10 @@ def retrieve_top_docs_batch(queries, tfidf_matrix, top_n=10):
     # compute term frequencies for queries
     queries_tf = [compute_tf(query) for query in queries]
 
-    similarities = cosine_similarity(queries_tf, tfidf_matrix)
+    # compute tf-idf for queries with compute_tfidf function
+    queries_tfidf = compute_tfidf(queries_tf, idfs)
+
+    similarities = cosine_similarity(queries_tfidf, tfidf_matrix)
     top_docs_batch = []
     for sim in similarities:
         top_indices = sim.argsort()[-top_n:][::-1]
