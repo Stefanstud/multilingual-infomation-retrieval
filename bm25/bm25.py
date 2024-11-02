@@ -16,6 +16,10 @@ from nltk.tokenize import word_tokenize
 import spacy
 from nltk.stem.snowball import SnowballStemmer
 import sys 
+import re
+from unicodedata import normalize
+from pyarabic.normalize import normalize_searchtext
+
 
 class BM25ChunkRetriever:
     def __init__(self, corpus_path=None, stopwords_path=None, chunk_size=500, k1 = 1.2, b = 0.7):
@@ -25,17 +29,14 @@ class BM25ChunkRetriever:
         self.language_stopwords = self._init_stopwords()
         self.chunk_to_original_doc = defaultdict(str)
         self.de_stemmer = SnowballStemmer("german")
-        # # download spacy spacy download de_core_news_sm
-        # self.nlp_de = spacy.load('de_core_news_sm', disable=['parser', 'ner'])
-        # self.nlp_ko = spacy.load('ko_core_news_sm', disable=['parser', 'ner'])
         self.k1 = k1
         self.b = b
 
     def _init_stopwords(self):
         """Initialize stopwords for all supported languages"""
-        # nltk.download('punkt')
-        # nltk.download('stopwords')
-        # nltk.download('punkt_tab')
+        nltk.download('punkt')
+        nltk.download('stopwords')
+        nltk.download('punkt_tab')
         
         language_stopwords = {
             "en": set(stopwords.words('english')),
@@ -51,7 +52,8 @@ class BM25ChunkRetriever:
                 language_stopwords["ko"] = set(f.read().splitlines())
                 
         return language_stopwords
-    
+
+
     @staticmethod
     def save_data(data, file_name):
         with open(file_name, 'wb') as f:
@@ -61,6 +63,15 @@ class BM25ChunkRetriever:
     def load_data(file_name):
         with open(file_name, 'rb') as f:
             return pickle.load(f)
+
+    def normalize_korean(self, text):
+        # Unicode normalization
+        text = normalize('NFKC', text)
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'[""』」]', '"', text)
+        text = re.sub(r'[''『「]', "'", text)
+        text = re.sub(r'^[.…]+', '', text)
+        return text.strip()
 
     def split_into_chunks(self, docid, text, is_query=False):
         """Split document into chunks of specified size"""
@@ -83,6 +94,12 @@ class BM25ChunkRetriever:
             docid = doc['docid']
             text = doc['text']
             lang = doc['lang']
+
+            # normalize arabic
+            if lang == "ar":
+                text = normalize_searchtext(text)
+            elif lang == "ko":
+                text = self.normalize_korean(text)
             
             chunks = self.split_into_chunks(docid, text, is_query)
             
@@ -98,7 +115,6 @@ class BM25ChunkRetriever:
                 # stemming
                 if lang == "de":
                     filtered_tokens = [self.de_stemmer.stem(word) for word in filtered_tokens]
-
                 
                 tf = Counter(filtered_tokens)
                 
@@ -119,7 +135,7 @@ class BM25ChunkRetriever:
         return tokenized_docs
     
     def build_vocab(self, tokenized_corpus):
-        """ Builds a vocabulary from the tokenized corpus. This can also be loaded from this to have a faster runtime"""
+        """ Builds a vocabulary from the tokenized corpus."""
         print("Building vocab...")
         vocab = set()
         for doc in tokenized_corpus.values():
@@ -205,14 +221,14 @@ class BM25ChunkRetriever:
             self.save_data(idfs, os.path.join(cache_dir, 'idfs.pkl'))
             self.save_data(avgdls, os.path.join(cache_dir, 'avgdls.pkl'))
         
-        # # Build and save BM25 matrix
-        # if os.path.exists(os.path.join(cache_dir, 'bm25_matrix.npz')):
-        #     bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
-        #     idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
-        # else:
-        bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
-            # sparse.save_npz(os.path.join(cache_dir, 'bm25_matrix.npz'), bm25_matrix)
-            # self.save_data(idx_to_chunkid, os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
+        # Build and save BM25 matrix
+        if os.path.exists(os.path.join(cache_dir, 'bm25_matrix.npz')):
+            bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
+            idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
+        else:
+            bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
+            sparse.save_npz(os.path.join(cache_dir, 'bm25_matrix.npz'), bm25_matrix)
+            self.save_data(idx_to_chunkid, os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
         
         # Build and save language masks
         if not os.path.exists(os.path.join(cache_dir, 'lang_masks.pkl')):
@@ -238,33 +254,12 @@ class BM25ChunkRetriever:
     def retrieve(self, queries, corpus, k=10, cache_dir='../data/'):
         """Retrieve documents using precomputed components"""
         # if any of the files are missing, precompute them
-        if not all([
-            os.path.exists(os.path.join(cache_dir, 'vocab.pkl')),
-            os.path.exists(os.path.join(cache_dir, 'idfs.pkl')),
-            os.path.exists(os.path.join(cache_dir, 'avgdls.pkl')),
-            not os.path.exists(os.path.join(cache_dir, 'bm25_matrix.npz')), # TODO change to back
-            os.path.exists(os.path.join(cache_dir, 'idx_to_chunkid.pkl')),
-            os.path.exists(os.path.join(cache_dir, 'lang_masks.pkl')),
-            os.path.exists(os.path.join(cache_dir, 'chunk_mapping.pkl'))
-        ]):
-            precomputed = self.precompute(corpus, cache_dir)
-            vocab, idfs, avgdls, bm25_matrix, idx_to_chunkid, lang_masks = (
-                precomputed['vocab'], precomputed['idfs'], precomputed['avgdls'],
-                precomputed['bm25_matrix'], precomputed['idx_to_chunkid'], precomputed['lang_masks']
-            )
+        precomputed = self.precompute(corpus, cache_dir)
+        vocab, idfs, avgdls, bm25_matrix, idx_to_chunkid, lang_masks = (
+            precomputed['vocab'], precomputed['idfs'], precomputed['avgdls'],
+            precomputed['bm25_matrix'], precomputed['idx_to_chunkid'], precomputed['lang_masks']
+        )
 
-        else:
-            # vocab = self.load_data(os.path.join(cache_dir, 'vocab.pkl'))
-            # idfs = self.load_data(os.path.join(cache_dir, 'idfs.pkl'))
-            # avgdls = self.load_data(os.path.join(cache_dir, 'avgdls.pkl'))
-            # bm25_matrix = sparse.load_npz(os.path.join(cache_dir, 'bm25_matrix.npz'))
-            # idx_to_chunkid = self.load_data(os.path.join(cache_dir, 'idx_to_chunkid.pkl'))
-            # bm25_matrix, idx_to_chunkid = self.build_sparse_matrix(tokenized_corpus, vocab, idfs, avgdls, k1=self.k1, b=self.b)
-            # lang_masks = self.load_data(os.path.join(cache_dir, 'lang_masks.pkl'))
-            # self.chunk_to_original_doc = self.load_data(os.path.join(cache_dir, 'chunk_mapping.pkl'))
-            # raise error in else block
-            raise ValueError("Some precomputed files are missing. Please re-run with precompute=True")
-            
         # Process queries
         query_docs = [
             {'docid': idx, 'text': row['query'], 'lang': row['lang']}
@@ -283,7 +278,7 @@ class BM25ChunkRetriever:
             query_lang = queries.iloc[i]["lang"]
             masked_scores = np.where(lang_masks[query_lang] == 1, scores_matrix[i], -np.inf)
             
-            # get top-k; *20 as heuristic 
+            # Get top-k; *20 as heuristic 
             top_k_chunk_idx = np.argpartition(masked_scores, -k)[-k*20:]
             top_k_chunk_idx = top_k_chunk_idx[np.argsort(masked_scores[top_k_chunk_idx])[::-1]]
             
@@ -311,5 +306,4 @@ class BM25ChunkRetriever:
             writer = csv.writer(csvfile)
             writer.writerow(['id', 'docids'])
             for idx, docs in results.items():
-                # save as list like this: 0,"['doc-en-0', 'doc-de-14895', 'doc-en-829265', 'doc-en-147113', 'doc-en-644359', 'doc-en-585315', 'doc-en-234047', 'doc-en-14117', 'doc-en-794977', 'doc-en-374766']"
                 writer.writerow([idx, str(docs)])
