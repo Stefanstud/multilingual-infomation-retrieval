@@ -3,11 +3,10 @@
 # Configuration
 OUTPUT_DIR="models/bge-m3-finetuned"
 TRAIN_DATA="data/"
-NUM_GPUS=1  # Adjust based on your setup
-BATCH_SIZE=1  # Adjust based on your GPU memory
+NUM_GPUS=1 
+BATCH_SIZE=1 
 NUM_EPOCHS=1
 
-# Create output directory if it doesn't exist
 mkdir -p $OUTPUT_DIR
 
 torchrun --nproc_per_node $NUM_GPUS \
