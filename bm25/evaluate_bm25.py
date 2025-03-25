@@ -9,7 +9,6 @@ def evaluate_retrieval(queries, corpus, retriever):
     Evaluate retrieval performance per language with both micro and macro averaging
     """
     results = retriever.retrieve(queries, corpus)
-
     results_per_lang = {}
     total_recall_1 = 0
     total_top_10 = 0

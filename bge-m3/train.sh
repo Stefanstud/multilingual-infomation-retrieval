@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Configuration
+# config
 OUTPUT_DIR="models/bge-m3-finetuned"
 TRAIN_DATA="data/"
 NUM_GPUS=1 
@@ -8,7 +8,6 @@ BATCH_SIZE=1
 NUM_EPOCHS=1
 
 mkdir -p $OUTPUT_DIR
-
 torchrun --nproc_per_node $NUM_GPUS \
     -m FlagEmbedding.BGE_M3.run \
     --output_dir $OUTPUT_DIR \
